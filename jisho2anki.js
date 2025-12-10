@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Jisho2Anki
-// @namespace    http://tampermonkey.net/
+// @namespace    https://github.com/tontyoutoure/jisho2anki
 // @version      1.0
 // @description  Capture Jisho data and send to Anki via AnkiConnect
 // @author       https://www.github.com/tontyoutoure with help from Gemini

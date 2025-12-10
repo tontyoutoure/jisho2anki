@@ -9,6 +9,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
+// @license      MIT
 // ==/UserScript==
 
 (function () {

@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Jisho2Anki - Step 2 (Data Extraction)
+// @name         Jisho2Anki - Step 2.9 (Separate Notes)
 // @namespace    http://tampermonkey.net/
-// @version      0.2
-// @description  Inject buttons and extract data from Jisho.org
+// @version      0.7
+// @description  Extract Notes separately from Meanings
 // @author       You
 // @match        https://jisho.org/search/*
 // @match        https://jisho.org/word/*
@@ -13,7 +13,7 @@
     'use strict';
 
     // --- 配置 ---
-    const BUTTON_SIZE = '24px';
+    const BUTTON_SIZE = '20px';
     const ICON_COLOR = '#999';
     const ICON_HOVER_COLOR = '#555';
 
@@ -21,80 +21,123 @@
     const UPLOAD_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="${ICON_COLOR}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>`;
     const CONFIG_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="${ICON_COLOR}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
 
-    // --- 核心逻辑：数据提取 ---
+    // --- 核心逻辑：提取单个词条数据 ---
+    function extractJishoData(context) {
+        if (!context) return null;
 
-    function extractJishoData() {
-        const exactBlock = document.querySelector('.exact_block');
-        if (!exactBlock) {
-            console.error("未找到 Exact Block");
-            return null;
-        }
-
-        // 1. 获取原始形式 (Expression)
-        const textElement = exactBlock.querySelector('.concept_light-representation .text');
+        // 1. 获取原始形式
+        const textElement = context.querySelector('.concept_light-representation .text');
         const expression = textElement ? textElement.textContent.trim() : "";
 
-        // 2. 获取完整读音 (Reading) - 难点
-        // Jisho 的结构是：Furigana 里的 span 和 Text 里的节点是一一对应的
-        // Furigana Span 有字 -> 它是汉字的读音
-        // Furigana Span 为空 -> 它是假名（Okurigana），读音就是 Text 节点本身
+        // 2. 获取完整读音
         let reading = "";
-        const furiganaElement = exactBlock.querySelector('.concept_light-representation .furigana');
+        const furiganaElement = context.querySelector('.concept_light-representation .furigana');
 
         if (furiganaElement && textElement) {
-            const fChildren = furiganaElement.children; // Furigana 下的 spans
-            const tChildren = textElement.childNodes;   // Text 下的 nodes (包含纯文本和span)
-
-            // 遍历所有部分进行拼接
-            for (let i = 0; i < fChildren.length; i++) {
+            const fChildren = furiganaElement.children;
+            const tChildren = textElement.childNodes;
+            const loopLen = Math.min(fChildren.length, tChildren.length);
+            for (let i = 0; i < loopLen; i++) {
                 const fText = fChildren[i].textContent.trim();
                 const tText = tChildren[i].textContent.trim();
-
-                if (fText) {
-                    // 如果 Furigana 有内容，说明这是汉字，取注音 (例如 "おも")
-                    reading += fText;
-                } else {
-                    // 如果 Furigana 是空的，说明这是假名，取原文 (例如 "い")
-                    reading += tText;
-                }
+                reading += (fText ? fText : tText);
             }
         } else {
-            // 如果没有注音栏（通常是纯假名单词），读音就是单词本身
             reading = expression;
         }
 
-        // 3. 获取解释 (Meanings) 和 其他形式 (Other Forms)
-        let meanings = [];
+        // 3. 获取详细解释 / Notes / Other forms
+        let formattedMeanings = [];
         let otherForms = [];
+        let notes = []; // 新增：独立的 Notes 数组
 
-        // 找到包含所有解释的大容器
-        const meaningsWrapper = exactBlock.querySelector('.meanings-wrapper');
+        const meaningsWrapper = context.querySelector('.meanings-wrapper');
         if (meaningsWrapper) {
-            let currentCategory = 'definition'; // 状态机：默认在抓取定义
+            let currentPOS = "";
 
-            // 遍历容器的直接子元素 (tags 和 wrapper)
             for (const child of meaningsWrapper.children) {
+                // --- 标签处理 ---
                 if (child.classList.contains('meaning-tags')) {
-                    // 遇到标签，检查是不是 "Other forms"
-                    if (child.textContent.includes('Other forms')) {
-                        currentCategory = 'otherForms';
+                    const tagText = child.textContent.trim();
+                    if (tagText === 'Notes') {
+                        currentPOS = 'Notes'; // 标记进入 Notes 区域
+                    } else if (tagText.includes('Other forms')) {
+                        currentPOS = 'Other forms';
                     } else {
-                        currentCategory = 'definition';
+                        currentPOS = tagText;
                     }
-                } else if (child.classList.contains('meaning-wrapper')) {
-                    // 遇到内容块，根据当前状态提取
-                    if (currentCategory === 'definition') {
-                        const defText = child.querySelector('.meaning-meaning');
-                        if (defText) {
-                            // 移除 "1. " 这种序号 (可选，这里暂时保留纯文本)
-                            meanings.push(defText.textContent.trim());
+                }
+                // --- 内容块处理 ---
+                else if (child.classList.contains('meaning-wrapper')) {
+
+                    // Case A: Other Forms
+                    if (currentPOS === 'Other forms') {
+                        const formText = child.querySelector('.meaning-meaning');
+                        if (formText) otherForms.push(formText.textContent.trim());
+                    }
+
+                    // Case B: Notes (新逻辑)
+                    else if (currentPOS === 'Notes') {
+                        const defSection = child.querySelector('.meaning-definition');
+                        if (defSection) {
+                            // 简单的文本清理
+                            const clone = defSection.cloneNode(true);
+                            // 移除可能存在的 "Read more"
+                            const readMore = clone.querySelector('a');
+                            if(readMore && readMore.textContent.includes('Read more')) readMore.remove();
+
+                            notes.push(clone.textContent.trim());
                         }
-                    } else if (currentCategory === 'otherForms') {
-                        // 提取其他形式
-                         const formText = child.querySelector('.meaning-meaning');
-                        if (formText) {
-                            otherForms.push(formText.textContent.trim());
+                    }
+
+                    // Case C: 普通释义 (Meanings)
+                    else {
+                        let entryString = "";
+                        if (currentPOS) entryString += `${currentPOS}\n`;
+
+                        const defSection = child.querySelector('.meaning-definition');
+                        if (defSection) {
+                            const readMoreLink = defSection.querySelector('a');
+                            if (readMoreLink && readMoreLink.textContent.includes('Read more')) {
+                                readMoreLink.remove();
+                            }
+
+                            const meaningTextElem = defSection.querySelector('.meaning-meaning');
+                            let defText = "";
+
+                            if (meaningTextElem) {
+                                defText = meaningTextElem.textContent.trim();
+                            } else {
+                                const clone = defSection.cloneNode(true);
+                                const divider = clone.querySelector('.meaning-definition-section_divider');
+                                if (divider) divider.remove();
+                                defText = clone.textContent.trim();
+                            }
+
+                            const defNumberElement = defSection.querySelector('.meaning-definition-section_divider');
+                            const defNumber = defNumberElement ? defNumberElement.textContent.trim() + " " : "";
+
+                            entryString += `${defNumber}${defText}`;
                         }
+
+                        const sentenceDiv = child.querySelector('.sentence');
+                        if (sentenceDiv) {
+                            const japSentence = sentenceDiv.querySelector('.japanese');
+                            const engSentence = sentenceDiv.querySelector('.english');
+
+                            if (japSentence && engSentence) {
+                                const jClone = japSentence.cloneNode(true);
+                                const furiganas = jClone.querySelectorAll('.furigana');
+                                furiganas.forEach(f => f.remove());
+
+                                const jText = jClone.textContent.replace(/\s+/g, '').trim();
+                                const eText = engSentence.textContent.trim();
+
+                                entryString += `\n${jText}\n${eText}`;
+                            }
+                        }
+
+                        if (entryString) formattedMeanings.push(entryString);
                     }
                 }
             }
@@ -103,28 +146,31 @@
         return {
             expression: expression,
             reading: reading,
-            meanings: meanings,
-            otherForms: otherForms
+            meanings: formattedMeanings,
+            otherForms: otherForms,
+            notes: notes // 返回独立的 notes
         };
     }
 
     // --- UI 构建函数 ---
-
     function createButton(htmlIcon, title, onClickHandler) {
         const btn = document.createElement('button');
         btn.innerHTML = htmlIcon;
         btn.title = title;
+        btn.className = 'jisho2anki-btn';
         btn.style.background = 'none';
         btn.style.border = 'none';
         btn.style.cursor = 'pointer';
-        btn.style.padding = '0 5px';
+        btn.style.padding = '2px 5px';
         btn.style.transition = 'all 0.2s ease';
+        btn.style.verticalAlign = 'middle';
 
         btn.onmouseover = () => { btn.querySelector('svg').style.stroke = ICON_HOVER_COLOR; };
         btn.onmouseout = () => { btn.querySelector('svg').style.stroke = ICON_COLOR; };
 
         btn.addEventListener('click', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             onClickHandler(e);
         });
 
@@ -132,54 +178,63 @@
     }
 
     function injectControls() {
-        const exactBlock = document.querySelector('.exact_block');
-        if (!exactBlock) return;
+        const wordEntries = document.querySelectorAll('.concept_light');
 
-        // 防止重复注入 (如果页面动态加载)
-        if (document.getElementById('jisho2anki-controls')) return;
+        wordEntries.forEach(entry => {
+            if (entry.querySelector('.jisho2anki-controls')) return;
 
-        const container = document.createElement('div');
-        container.id = 'jisho2anki-controls';
-        container.style.display = 'inline-flex';
-        container.style.alignItems = 'center';
-        container.style.float = 'right';
-        container.style.marginTop = '-5px';
+            const container = document.createElement('div');
+            container.className = 'jisho2anki-controls';
+            container.style.display = 'inline-block';
+            container.style.marginLeft = '10px';
 
-        // 1. 上传按钮
-        const uploadBtn = createButton(UPLOAD_ICON, "Upload to Anki", () => {
-            console.log("--- 开始提取数据 ---");
-            const data = extractJishoData();
-            if (data) {
-                console.log("原始形式:", data.expression);
-                console.log("完整读音:", data.reading);
-                console.log("解释:", data.meanings.join('; '));
-                console.log("其他形式:", data.otherForms.join('; '));
-                console.log("完整对象:", data);
+            const uploadBtn = createButton(UPLOAD_ICON, "Upload this word to Anki", () => {
+                console.log(`%c[Jisho2Anki] 正在提取: `, "color: green; font-weight: bold;");
+                try {
+                    const data = extractJishoData(entry);
+                    if (data) {
+                        console.log("--------------------------------");
+                        console.log("【单词】", data.expression);
+                        console.log("【读音】", data.reading);
+                        console.log("【释义】\n", data.meanings.join('\n\n'));
+                        console.log("【其他形式】", data.otherForms.join('; '));
+                        console.log("【备注(Notes)】", data.notes.join('\n')); // 单独打印 Notes
+                        console.log("--------------------------------");
+                    }
+                } catch (err) {
+                    console.error("提取数据时出错:", err);
+                }
+            });
+
+            const configBtn = createButton(CONFIG_ICON, "Configure AnkiConnect", () => {
+                console.log("[Jisho2Anki] 点击了配置");
+            });
+
+            container.appendChild(uploadBtn);
+            container.appendChild(configBtn);
+
+            const statusDiv = entry.querySelector('.concept_light-status');
+            if (statusDiv) {
+                statusDiv.insertBefore(container, statusDiv.firstChild);
+            } else {
+                const wrapper = entry.querySelector('.concept_light-wrapper');
+                if (wrapper) wrapper.appendChild(container);
             }
-            console.log("--- 提取结束 ---");
         });
-
-        // 2. 配置按钮
-        const configBtn = createButton(CONFIG_ICON, "Configure AnkiConnect", () => {
-            console.log("配置");
-        });
-
-        container.appendChild(uploadBtn);
-        container.appendChild(configBtn);
-
-        const header = exactBlock.querySelector('h4');
-        if (header) {
-            header.appendChild(container);
-        } else {
-            exactBlock.insertBefore(container, exactBlock.firstChild);
-        }
     }
 
-    // --- 执行入口 ---
+    const observer = new MutationObserver((mutations) => {
+        injectControls();
+    });
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', injectControls);
+        document.addEventListener('DOMContentLoaded', () => {
+            injectControls();
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
     } else {
         injectControls();
+        observer.observe(document.body, { childList: true, subtree: true });
     }
 
 })();

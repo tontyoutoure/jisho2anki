@@ -329,18 +329,16 @@
 
     // --- UI Helpers for Dynamic Mapping ---
 
-    // --- UI Helpers for Dynamic Mapping ---
-
     const JISHO_KEYS = ['expression', 'reading', 'meanings', 'otherForms', 'notes'];
 
     function createMappingSelect(selectedValue = "") {
         const sel = document.createElement('select');
-        // 核心修改：增加 boxSizing 和 margin: 0 以消除对齐误差
+        // Core modification: Add boxSizing and margin: 0 to eliminate alignment errors
         Object.assign(sel.style, {
-            width: '100%',             // 默认占满容器
-            height: '30px',            // 固定高度
-            boxSizing: 'border-box',   // 包含边框和内边距
-            margin: '0',               // 清除浏览器默认边距
+            width: '100%',             // Fill the container
+            height: '30px',            // Fixed height
+            boxSizing: 'border-box',   // Include padding and border in width
+            margin: '0',               // Remove default browser margin
             padding: '0 5px',
             border: '1px solid #ccc',
             borderRadius: '4px',
@@ -373,7 +371,7 @@
         });
         container.dataset.ankiField = ankiField;
 
-        // 标签
+        // Label
         const label = document.createElement('div');
         label.textContent = ankiField;
         Object.assign(label.style, {
@@ -384,11 +382,11 @@
         });
         container.appendChild(label);
 
-        // 输入控件容器
+        // Input control container
         const inputsDiv = document.createElement('div');
         container.appendChild(inputsDiv);
 
-        // 样式常量
+        // Style constants
         const ROW_STYLE = {
             display: 'flex',
             alignItems: 'center',
@@ -398,7 +396,7 @@
         };
 
         const BUTTON_STYLE = {
-            flex: '0 0 30px',          // 固定宽度 30px
+            flex: '0 0 30px',          // Fixed width 30px
             width: '30px',
             height: '30px',
             boxSizing: 'border-box',
@@ -416,13 +414,13 @@
             color: '#555'
         };
 
-        // 辅助函数：创建一行输入（带可选的右侧元素）
+        // Helper function: Create a single row of input (with optional right element)
         const createRowElement = (selectedValue, rightElement) => {
             const row = document.createElement('div');
             Object.assign(row.style, ROW_STYLE);
 
             const select = createMappingSelect(selectedValue);
-            select.style.flex = '1'; // 自动占据剩余空间
+            select.style.flex = '1'; // Automatically fill remaining space
 
             row.appendChild(select);
             if (rightElement) {
@@ -431,20 +429,20 @@
             return row;
         };
 
-        // 辅助函数：创建占位符（用于对齐没有按钮的行）
+        // Helper function: Create spacer (for aligning rows without buttons)
         const createSpacer = () => {
             const spacer = document.createElement('div');
-            // 复制按钮的布局属性，但使其不可见
+            // Copy button layout attributes but make it invisible
             Object.assign(spacer.style, BUTTON_STYLE, {
                 backgroundColor: 'transparent',
                 border: 'none',
                 cursor: 'default',
-                visibility: 'hidden' // 关键：不可见但占据空间
+                visibility: 'hidden' // Key: Invisible but occupies space
             });
             return spacer;
         };
 
-        // --- 第一行：下拉菜单 + 真实的“+”按钮 ---
+        // --- First row: Dropdown + Real "+" button ---
         const values = (initialValues && initialValues.length > 0) ? initialValues : [''];
 
         const addBtn = document.createElement('button');
@@ -452,7 +450,7 @@
         addBtn.title = "Add another source field";
         Object.assign(addBtn.style, BUTTON_STYLE);
 
-        // 按钮交互
+        // Button interaction
         addBtn.onmouseover = () => {
             addBtn.style.backgroundColor = '#e8e8e8';
             addBtn.style.borderColor = '#bbb';
@@ -462,17 +460,17 @@
             addBtn.style.borderColor = '#ccc';
         };
 
-        // 添加第一行
+        // Add first row
         inputsDiv.appendChild(createRowElement(values[0], addBtn));
 
-        // --- 后续行：下拉菜单 + 占位符 ---
+        // --- Subsequent rows: Dropdown + Spacer ---
         for (let i = 1; i < values.length; i++) {
             inputsDiv.appendChild(createRowElement(values[i], createSpacer()));
         }
 
-        // --- 按钮点击事件：添加新行（带占位符） ---
+        // --- Button Click Event: Add new row (with spacer) ---
         addBtn.onclick = () => {
-            // 新增的行也必须带占位符，以保持对齐
+            // New rows must also have a spacer to maintain alignment
             inputsDiv.appendChild(createRowElement('', createSpacer()));
         };
 

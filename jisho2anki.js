@@ -11,7 +11,7 @@
 // @connect      localhost
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // --- Configuration Constants ---
@@ -179,7 +179,7 @@
                         if (defSection) {
                             const clone = defSection.cloneNode(true);
                             const readMore = clone.querySelector('a');
-                            if(readMore && readMore.textContent.includes('Read more')) readMore.remove();
+                            if (readMore && readMore.textContent.includes('Read more')) readMore.remove();
                             notesRaw.push(clone.textContent.trim());
                         }
                     }
@@ -329,12 +329,24 @@
 
     // --- UI Helpers for Dynamic Mapping ---
 
+    // --- UI Helpers for Dynamic Mapping ---
+
     const JISHO_KEYS = ['expression', 'reading', 'meanings', 'otherForms', 'notes'];
 
     function createMappingSelect(selectedValue = "") {
         const sel = document.createElement('select');
+        // 核心修改：增加 boxSizing 和 margin: 0 以消除对齐误差
         Object.assign(sel.style, {
-            width: 'calc(100% - 30px)', padding: '5px', marginBottom: '5px', display: 'block'
+            width: '100%',             // 默认占满容器
+            height: '30px',            // 固定高度
+            boxSizing: 'border-box',   // 包含边框和内边距
+            margin: '0',               // 清除浏览器默认边距
+            padding: '0 5px',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            backgroundColor: '#fff',
+            fontSize: '13px',
+            verticalAlign: 'middle'
         });
 
         const emptyOpt = document.createElement('option');
@@ -354,47 +366,119 @@
 
     function createMappingRow(ankiField, initialValues = []) {
         const container = document.createElement('div');
-        container.style.marginBottom = '10px';
-        container.style.borderBottom = '1px dashed #eee';
-        container.style.paddingBottom = '5px';
+        Object.assign(container.style, {
+            marginBottom: '10px',
+            borderBottom: '1px dashed #eee',
+            paddingBottom: '8px'
+        });
         container.dataset.ankiField = ankiField;
 
+        // 标签
         const label = document.createElement('div');
         label.textContent = ankiField;
-        label.style.fontWeight = 'bold';
-        label.style.fontSize = '0.9em';
-        label.style.marginBottom = '3px';
+        Object.assign(label.style, {
+            fontWeight: 'bold',
+            fontSize: '0.9em',
+            marginBottom: '4px',
+            color: '#333'
+        });
         container.appendChild(label);
 
+        // 输入控件容器
         const inputsDiv = document.createElement('div');
         container.appendChild(inputsDiv);
 
-        if (!initialValues || initialValues.length === 0) {
-            inputsDiv.appendChild(createMappingSelect());
-        } else {
-            const values = Array.isArray(initialValues) ? initialValues : [initialValues];
-            values.forEach(val => {
-                inputsDiv.appendChild(createMappingSelect(val));
+        // 样式常量
+        const ROW_STYLE = {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            width: '100%',
+            marginBottom: '5px'
+        };
+
+        const BUTTON_STYLE = {
+            flex: '0 0 30px',          // 固定宽度 30px
+            width: '30px',
+            height: '30px',
+            boxSizing: 'border-box',
+            margin: '0',
+            padding: '0',
+            cursor: 'pointer',
+            backgroundColor: '#f8f8f8',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            fontSize: '16px',
+            lineHeight: '1',
+            color: '#555'
+        };
+
+        // 辅助函数：创建一行输入（带可选的右侧元素）
+        const createRowElement = (selectedValue, rightElement) => {
+            const row = document.createElement('div');
+            Object.assign(row.style, ROW_STYLE);
+
+            const select = createMappingSelect(selectedValue);
+            select.style.flex = '1'; // 自动占据剩余空间
+
+            row.appendChild(select);
+            if (rightElement) {
+                row.appendChild(rightElement);
+            }
+            return row;
+        };
+
+        // 辅助函数：创建占位符（用于对齐没有按钮的行）
+        const createSpacer = () => {
+            const spacer = document.createElement('div');
+            // 复制按钮的布局属性，但使其不可见
+            Object.assign(spacer.style, BUTTON_STYLE, {
+                backgroundColor: 'transparent',
+                border: 'none',
+                cursor: 'default',
+                visibility: 'hidden' // 关键：不可见但占据空间
             });
-        }
+            return spacer;
+        };
+
+        // --- 第一行：下拉菜单 + 真实的“+”按钮 ---
+        const values = (initialValues && initialValues.length > 0) ? initialValues : [''];
 
         const addBtn = document.createElement('button');
         addBtn.textContent = '+';
-        Object.assign(addBtn.style, {
-            width: '24px', height: '24px', cursor: 'pointer',
-            backgroundColor: '#eee', border: '1px solid #ccc', borderRadius: '4px',
-            marginLeft: '5px'
-        });
-        addBtn.title = "Add another source field for this Anki field";
+        addBtn.title = "Add another source field";
+        Object.assign(addBtn.style, BUTTON_STYLE);
 
-        addBtn.onclick = () => {
-            inputsDiv.appendChild(createMappingSelect());
+        // 按钮交互
+        addBtn.onmouseover = () => {
+            addBtn.style.backgroundColor = '#e8e8e8';
+            addBtn.style.borderColor = '#bbb';
+        };
+        addBtn.onmouseout = () => {
+            addBtn.style.backgroundColor = '#f8f8f8';
+            addBtn.style.borderColor = '#ccc';
         };
 
-        container.appendChild(addBtn);
+        // 添加第一行
+        inputsDiv.appendChild(createRowElement(values[0], addBtn));
+
+        // --- 后续行：下拉菜单 + 占位符 ---
+        for (let i = 1; i < values.length; i++) {
+            inputsDiv.appendChild(createRowElement(values[i], createSpacer()));
+        }
+
+        // --- 按钮点击事件：添加新行（带占位符） ---
+        addBtn.onclick = () => {
+            // 新增的行也必须带占位符，以保持对齐
+            inputsDiv.appendChild(createRowElement('', createSpacer()));
+        };
+
         return container;
     }
-
+    
     // --- Modal UI Construction ---
 
     function createModal() {
@@ -441,7 +525,7 @@
             statusSpan.style.color = isConnected ? 'green' : 'red';
             deckSelect.disabled = !isConnected;
             modelSelect.disabled = !isConnected;
-            if(isConnected) refreshDropdowns();
+            if (isConnected) refreshDropdowns();
         };
 
         const tryConnect = async () => {
@@ -488,7 +572,7 @@
                 const opt = document.createElement('option');
                 opt.value = d;
                 opt.textContent = d;
-                if(d === currentConfig.deckName) opt.selected = true;
+                if (d === currentConfig.deckName) opt.selected = true;
                 deckSelect.appendChild(opt);
             });
 
@@ -497,11 +581,11 @@
                 const opt = document.createElement('option');
                 opt.value = m;
                 opt.textContent = m;
-                if(m === currentConfig.modelName) opt.selected = true;
+                if (m === currentConfig.modelName) opt.selected = true;
                 modelSelect.appendChild(opt);
             });
 
-            if(modelSelect.value) generateMappingInputs(modelSelect.value);
+            if (modelSelect.value) generateMappingInputs(modelSelect.value);
         };
 
         const generateMappingInputs = async (modelName) => {
@@ -509,9 +593,9 @@
             const fields = await fetchModelFields(modelName);
             mappingContainer.innerHTML = `<strong>Mapping for: ${modelName}</strong><br><small>Click [+] to map multiple sources to one field (joined by newlines).</small><hr style="margin:5px 0 10px 0; border:0; border-top:1px solid #ddd;">`;
 
-            if(fields.length === 0) {
-                 mappingContainer.innerHTML += '<span style="color:red">No fields found.</span>';
-                 return;
+            if (fields.length === 0) {
+                mappingContainer.innerHTML += '<span style="color:red">No fields found.</span>';
+                return;
             }
 
             const savedMapping = currentConfig.fieldMapping[modelName] || {};
@@ -647,13 +731,13 @@
 
         btn.onmouseover = () => {
             const svg = btn.querySelector('svg');
-            if(svg && svg.style.stroke === 'rgb(153, 153, 153)')
-               svg.style.stroke = ICON_HOVER_COLOR;
+            if (svg && svg.style.stroke === 'rgb(153, 153, 153)')
+                svg.style.stroke = ICON_HOVER_COLOR;
         };
         btn.onmouseout = () => {
             const svg = btn.querySelector('svg');
-             if(svg && svg.style.stroke === 'rgb(85, 85, 85)')
-               svg.style.stroke = ICON_COLOR;
+            if (svg && svg.style.stroke === 'rgb(85, 85, 85)')
+                svg.style.stroke = ICON_COLOR;
         };
 
         btn.addEventListener('click', (e) => {

@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Jisho2Anki - Step 3.1 (Multi-Mapping UI)
+// @name         Jisho2Anki
 // @namespace    http://tampermonkey.net/
-// @version      0.9
-// @description  Add Scrollbar & Multi-Field Mapping support
-// @author       You
+// @version      1.0
+// @description  Capture Jisho data and send to Anki via AnkiConnect
+// @author       https://www.github.com/tontyoutoure with help from Gemini
 // @match        https://jisho.org/search/*
 // @match        https://jisho.org/word/*
 // @grant        GM_xmlhttpRequest
@@ -18,10 +18,10 @@
     const STORAGE_KEY = 'jisho2anki_config';
     const DEFAULT_CONFIG = {
         ankiUrl: 'http://127.0.0.1:8765',
-        deckName: 'Default',
-        modelName: 'Basic',
+        deckName: '',
+        modelName: '',
         tags: 'jisho.org',
-        fieldMapping: {} // Structure: { "ModelName": { "AnkiField": ["JishoKey1", "JishoKey2"] } }
+        fieldMapping: {}
     };
 
     // --- State Management ---
@@ -34,8 +34,13 @@
     const BUTTON_SIZE = '20px';
     const ICON_COLOR = '#999';
     const ICON_HOVER_COLOR = '#555';
+
+    // Icons
     const UPLOAD_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="${ICON_COLOR}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>`;
     const CONFIG_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="${ICON_COLOR}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    const SUCCESS_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="#47DB27" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+    const ERROR_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="#FF0000" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+    const LOADING_ICON = `<svg viewBox="0 0 24 24" width="${BUTTON_SIZE}" height="${BUTTON_SIZE}" stroke="#FFA500" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`;
 
     // --- AnkiConnect Helper Functions ---
 
@@ -55,11 +60,11 @@
                             resolve(res.result);
                         }
                     } catch (e) {
-                        reject("Failed to parse response");
+                        reject("Failed to parse response: " + response.responseText);
                     }
                 },
                 onerror: (err) => {
-                    reject("Network Error");
+                    reject("Network Error: Ensure Anki is running and AnkiConnect is installed.");
                 }
             });
         });
@@ -103,8 +108,6 @@
     // --- Local Storage Helpers ---
     function loadConfig() {
         const stored = localStorage.getItem(STORAGE_KEY);
-        // Simple migration check: if old config format (string mapping), reset mapping or handle carefully.
-        // For simplicity in this step, we assume fresh or compatible structure.
         return stored ? { ...DEFAULT_CONFIG, ...JSON.parse(stored) } : DEFAULT_CONFIG;
     }
 
@@ -112,32 +115,48 @@
         localStorage.setItem(STORAGE_KEY, JSON.stringify(currentConfig));
     }
 
-    // --- Data Extraction Logic (Same as Step 3.0) ---
+    // --- Data Extraction Logic (Fixed Reading Logic) ---
     function extractJishoData(context) {
         if (!context) return null;
 
         const textElement = context.querySelector('.concept_light-representation .text');
         const expression = textElement ? textElement.textContent.trim() : "";
 
+        // --- Reading Extraction (Fix for "Taisetsu" bug) ---
         let reading = "";
         const furiganaElement = context.querySelector('.concept_light-representation .furigana');
 
         if (furiganaElement && textElement) {
-            const fChildren = furiganaElement.children;
-            const tChildren = textElement.childNodes;
-            const loopLen = Math.min(fChildren.length, tChildren.length);
-            for (let i = 0; i < loopLen; i++) {
+            const fChildren = Array.from(furiganaElement.children);
+
+            // Clean tChildren: remove pure whitespace text nodes to ensure alignment
+            const tChildren = Array.from(textElement.childNodes).filter(node => {
+                return node.textContent.trim().length > 0;
+            });
+
+            // Use the FURIGANA length as the master loop, as it defines the segments
+            for (let i = 0; i < fChildren.length; i++) {
                 const fText = fChildren[i].textContent.trim();
-                const tText = tChildren[i].textContent.trim();
-                reading += (fText ? fText : tText);
+
+                if (fText) {
+                    // Case A: Furigana exists (e.g., "たい" or "せつ")
+                    // We simply use the furigana.
+                    reading += fText;
+                } else {
+                    // Case B: Furigana is empty (e.g., Okurigana like "い" in "おもい")
+                    // We fallback to the source text.
+                    if (i < tChildren.length) {
+                        reading += tChildren[i].textContent.trim();
+                    }
+                }
             }
         } else {
             reading = expression;
         }
 
         let formattedMeanings = [];
-        let otherForms = [];
-        let notes = [];
+        let otherFormsRaw = [];
+        let notesRaw = [];
 
         const meaningsWrapper = context.querySelector('.meanings-wrapper');
         if (meaningsWrapper) {
@@ -153,7 +172,7 @@
                 else if (child.classList.contains('meaning-wrapper')) {
                     if (currentPOS === 'Other forms') {
                         const formText = child.querySelector('.meaning-meaning');
-                        if (formText) otherForms.push(formText.textContent.trim());
+                        if (formText) otherFormsRaw.push(formText.textContent.trim());
                     }
                     else if (currentPOS === 'Notes') {
                         const defSection = child.querySelector('.meaning-definition');
@@ -161,12 +180,16 @@
                             const clone = defSection.cloneNode(true);
                             const readMore = clone.querySelector('a');
                             if(readMore && readMore.textContent.includes('Read more')) readMore.remove();
-                            notes.push(clone.textContent.trim());
+                            notesRaw.push(clone.textContent.trim());
                         }
                     }
                     else {
-                        let entryString = "";
-                        if (currentPOS) entryString += `[${currentPOS}] `;
+                        // --- Building Meaning Entry (HTML) ---
+                        let entryHtml = `<div style="text-align: left; margin-bottom: 12px;">`;
+
+                        if (currentPOS) {
+                            entryHtml += `<div style="font-size: 0.85em; color: #666; margin-bottom: 2px;">[${currentPOS}]</div>`;
+                        }
 
                         const defSection = child.querySelector('.meaning-definition');
                         if (defSection) {
@@ -178,7 +201,7 @@
                             const defNumberElement = defSection.querySelector('.meaning-definition-section_divider');
                             const defNumber = defNumberElement ? defNumberElement.textContent.trim() + " " : "";
 
-                            entryString += `${defNumber}${defText}`;
+                            entryHtml += `<div>${defNumber}${defText}</div>`;
                         }
 
                         const sentenceDiv = child.querySelector('.sentence');
@@ -188,22 +211,120 @@
                             if (japSentence && engSentence) {
                                 const jClone = japSentence.cloneNode(true);
                                 jClone.querySelectorAll('.furigana').forEach(f => f.remove());
-                                entryString += `<br>ex: ${jClone.textContent.replace(/\s+/g, '').trim()} (${engSentence.textContent.trim()})`;
+
+                                const jpText = jClone.textContent.replace(/\s+/g, '').trim();
+
+                                entryHtml += `<div style="margin-top: 5px; padding-left: 10px; border-left: 2px solid #ddd; font-size: 0.9em;">
+                                                <div style="margin-bottom: 2px;">${jpText}</div>
+                                                <div style="color: #555; font-style: italic;">${engSentence.textContent.trim()}</div>
+                                              </div>`;
                             }
                         }
-                        if (entryString) formattedMeanings.push(entryString);
+
+                        entryHtml += `</div>`;
+                        formattedMeanings.push(entryHtml);
                     }
                 }
             }
         }
 
+        let otherFormsFormatted = "";
+        if (otherFormsRaw.length > 0) {
+            otherFormsFormatted = `<div style="text-align: left; margin-bottom: 5px;">
+                                     <strong>Other forms:</strong> ${otherFormsRaw.join('; ')}
+                                   </div>`;
+        }
+
+        let notesFormatted = "";
+        if (notesRaw.length > 0) {
+            notesFormatted = `<div style="text-align: left; margin-bottom: 5px;">
+                                <strong>Notes:</strong><br>${notesRaw.join('<br>')}
+                              </div>`;
+        }
+
         return {
             expression,
             reading,
-            meanings: formattedMeanings.join('<br>'),
-            otherForms: otherForms.join('; '),
-            notes: notes.join('<br>')
+            meanings: formattedMeanings.join(''),
+            otherForms: otherFormsFormatted,
+            notes: notesFormatted
         };
+    }
+
+    // --- Step 4: Upload Logic ---
+
+    async function uploadToAnki(entry, btnElement) {
+        if (!currentConfig.deckName || !currentConfig.modelName) {
+            alert("❌ Please configure Deck and Model first by clicking the gear icon.");
+            createModal();
+            return;
+        }
+
+        const jishoData = extractJishoData(entry);
+        if (!jishoData) {
+            alert("❌ Failed to extract data from this entry.");
+            return;
+        }
+
+        const originalIcon = btnElement.innerHTML;
+        btnElement.innerHTML = LOADING_ICON;
+
+        try {
+            const modelMapping = currentConfig.fieldMapping[currentConfig.modelName];
+            const ankiFields = {};
+
+            if (!modelMapping) {
+                throw new Error(`No field mapping found for model: ${currentConfig.modelName}. Please configure mapping.`);
+            }
+
+            for (const [ankiField, jishoKeys] of Object.entries(modelMapping)) {
+                if (Array.isArray(jishoKeys) && jishoKeys.length > 0) {
+                    const values = jishoKeys
+                        .map(key => jishoData[key])
+                        .filter(val => val && val.trim() !== "");
+
+                    if (values.length > 0) {
+                        ankiFields[ankiField] = values.join('<br>');
+                    }
+                }
+            }
+
+            const tags = currentConfig.tags.split(' ').map(t => t.trim()).filter(t => t !== "");
+            tags.push('jisho2anki');
+
+            const note = {
+                deckName: currentConfig.deckName,
+                modelName: currentConfig.modelName,
+                fields: ankiFields,
+                options: {
+                    allowDuplicate: false,
+                    duplicateScope: "deck",
+                    duplicateScopeOptions: {
+                        deckName: currentConfig.deckName,
+                        checkChildren: false,
+                        checkAllModels: false
+                    }
+                },
+                tags: tags
+            };
+
+            console.log("[Jisho2Anki] Sending Note:", note);
+
+            const noteId = await ankiInvoke('addNote', { note });
+
+            if (noteId === null) {
+                throw new Error("Duplicate note likely exists.");
+            }
+
+            console.log(`[Jisho2Anki] Success! Note ID: ${noteId}`);
+            btnElement.innerHTML = SUCCESS_ICON;
+
+        } catch (e) {
+            console.error("[Jisho2Anki] Upload Failed:", e);
+            btnElement.innerHTML = ERROR_ICON;
+            alert(`❌ Upload Failed:\n${e}`);
+            setTimeout(() => { btnElement.innerHTML = originalIcon; }, 3000);
+        }
     }
 
     // --- UI Helpers for Dynamic Mapping ---
@@ -216,7 +337,6 @@
             width: 'calc(100% - 30px)', padding: '5px', marginBottom: '5px', display: 'block'
         });
 
-        // Default empty option
         const emptyOpt = document.createElement('option');
         emptyOpt.text = '-- Ignore --';
         emptyOpt.value = '';
@@ -237,9 +357,8 @@
         container.style.marginBottom = '10px';
         container.style.borderBottom = '1px dashed #eee';
         container.style.paddingBottom = '5px';
-        container.dataset.ankiField = ankiField; // Helper for saving
+        container.dataset.ankiField = ankiField;
 
-        // Label
         const label = document.createElement('div');
         label.textContent = ankiField;
         label.style.fontWeight = 'bold';
@@ -247,22 +366,18 @@
         label.style.marginBottom = '3px';
         container.appendChild(label);
 
-        // Inputs Container
         const inputsDiv = document.createElement('div');
         container.appendChild(inputsDiv);
 
-        // Add Initial Selects
         if (!initialValues || initialValues.length === 0) {
-            inputsDiv.appendChild(createMappingSelect()); // One empty by default
+            inputsDiv.appendChild(createMappingSelect());
         } else {
-            // Ensure initialValues is an array (handle legacy string config if any)
             const values = Array.isArray(initialValues) ? initialValues : [initialValues];
             values.forEach(val => {
                 inputsDiv.appendChild(createMappingSelect(val));
             });
         }
 
-        // Add [+] Button
         const addBtn = document.createElement('button');
         addBtn.textContent = '+';
         Object.assign(addBtn.style, {
@@ -273,18 +388,12 @@
         addBtn.title = "Add another source field for this Anki field";
 
         addBtn.onclick = () => {
-            const newSelect = createMappingSelect();
-            // Add a remove button for added selects? For simplicity, we just append now.
-            // Improved UX: Insert before the button, but we placed button outside inputsDiv?
-            // Let's place the button at the bottom of the input list
-            inputsDiv.appendChild(newSelect);
+            inputsDiv.appendChild(createMappingSelect());
         };
 
         container.appendChild(addBtn);
-
         return container;
     }
-
 
     // --- Modal UI Construction ---
 
@@ -302,27 +411,24 @@
         const modalContent = document.createElement('div');
         Object.assign(modalContent.style, {
             backgroundColor: 'white', padding: '20px', borderRadius: '8px',
-            width: '500px', maxWidth: '90%', maxHeight: '90vh', // Limit height
+            width: '500px', maxWidth: '90%', maxHeight: '90vh',
             boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
             fontFamily: 'sans-serif', fontSize: '14px',
-            display: 'flex', flexDirection: 'column' // Flex layout for scrolling content
+            display: 'flex', flexDirection: 'column'
         });
 
-        // Header
         const header = document.createElement('h2');
         header.textContent = 'Jisho2Anki Configuration';
         header.style.marginTop = '0';
         header.style.borderBottom = '1px solid #eee';
         header.style.paddingBottom = '10px';
-        header.style.flexShrink = '0'; // Header doesn't shrink
+        header.style.flexShrink = '0';
 
-        // Scrollable Content Wrapper
         const scrollableContent = document.createElement('div');
         Object.assign(scrollableContent.style, {
             overflowY: 'auto', paddingRight: '5px', flexGrow: '1'
         });
 
-        // --- URL Input ---
         const urlGroup = createInputGroup('AnkiConnect URL:', 'text', currentConfig.ankiUrl);
         const urlInput = urlGroup.querySelector('input');
         const statusSpan = document.createElement('span');
@@ -330,7 +436,6 @@
         statusSpan.style.fontWeight = 'bold';
         urlGroup.appendChild(statusSpan);
 
-        // --- Connection Logic ---
         const updateStatus = (isConnected, msg) => {
             statusSpan.textContent = msg;
             statusSpan.style.color = isConnected ? 'green' : 'red';
@@ -358,7 +463,6 @@
 
         urlInput.addEventListener('blur', tryConnect);
 
-        // --- Dropdowns ---
         const deckGroup = createSelectGroup('Target Deck:', 'Loading...');
         const deckSelect = deckGroup.querySelector('select');
         deckSelect.disabled = true;
@@ -367,22 +471,17 @@
         const modelSelect = modelGroup.querySelector('select');
         modelSelect.disabled = true;
 
-        // --- Tags ---
         const tagGroup = createInputGroup('Tags (space separated):', 'text', currentConfig.tags);
         const tagInput = tagGroup.querySelector('input');
 
-        // --- Field Mapping Container (Updated Step 3.1) ---
         const mappingContainer = document.createElement('div');
         Object.assign(mappingContainer.style, {
             marginTop: '15px', padding: '10px', backgroundColor: '#f9f9f9',
             border: '1px solid #eee',
-            maxHeight: '300px', // Scrollbar Limit
-            overflowY: 'auto'   // Scrollbar Enable
+            maxHeight: '300px', overflowY: 'auto'
         });
         mappingContainer.innerHTML = '<strong>Field Mapping</strong><br><small style="color:#666">Select a Model first to map fields.</small>';
 
-
-        // --- Refresh Logic ---
         const refreshDropdowns = () => {
             deckSelect.innerHTML = '';
             availableDecks.forEach(d => {
@@ -408,18 +507,16 @@
         const generateMappingInputs = async (modelName) => {
             mappingContainer.innerHTML = 'Loading fields...';
             const fields = await fetchModelFields(modelName);
-            mappingContainer.innerHTML = `<strong>Mapping for: ${modelName}</strong><br><small>Click [+] to map multiple sources to one field.</small><hr style="margin:5px 0 10px 0; border:0; border-top:1px solid #ddd;">`;
+            mappingContainer.innerHTML = `<strong>Mapping for: ${modelName}</strong><br><small>Click [+] to map multiple sources to one field (joined by newlines).</small><hr style="margin:5px 0 10px 0; border:0; border-top:1px solid #ddd;">`;
 
             if(fields.length === 0) {
                  mappingContainer.innerHTML += '<span style="color:red">No fields found.</span>';
                  return;
             }
 
-            // Get existing config for this model
             const savedMapping = currentConfig.fieldMapping[modelName] || {};
 
             fields.forEach(field => {
-                // savedMapping[field] might be a string (old) or array (new) or undefined
                 const row = createMappingRow(field, savedMapping[field]);
                 mappingContainer.appendChild(row);
             });
@@ -429,7 +526,6 @@
             generateMappingInputs(e.target.value);
         });
 
-        // --- Footer Buttons ---
         const footer = document.createElement('div');
         Object.assign(footer.style, { marginTop: '20px', textAlign: 'right', flexShrink: '0', paddingTop: '10px', borderTop: '1px solid #eee' });
 
@@ -448,18 +544,14 @@
         });
 
         saveBtn.onclick = () => {
-            // Harvest Data
             currentConfig.ankiUrl = urlInput.value;
             currentConfig.deckName = deckSelect.value;
             currentConfig.modelName = modelSelect.value;
             currentConfig.tags = tagInput.value;
 
-            // Harvest Mappings (Multi-select support)
             if (modelSelect.value) {
                 if (!currentConfig.fieldMapping) currentConfig.fieldMapping = {};
                 const newModelMapping = {};
-
-                // Find all mapping rows
                 const rows = mappingContainer.querySelectorAll('div[data-anki-field]');
                 rows.forEach(row => {
                     const ankiField = row.dataset.ankiField;
@@ -468,13 +560,8 @@
                     selects.forEach(s => {
                         if (s.value) values.push(s.value);
                     });
-
-                    // Save as array if it has values, else undefined/empty
-                    if (values.length > 0) {
-                        newModelMapping[ankiField] = values;
-                    }
+                    if (values.length > 0) newModelMapping[ankiField] = values;
                 });
-
                 currentConfig.fieldMapping[modelSelect.value] = newModelMapping;
             }
 
@@ -489,7 +576,6 @@
         footer.appendChild(cancelBtn);
         footer.appendChild(saveBtn);
 
-        // Assembly
         scrollableContent.appendChild(urlGroup);
         scrollableContent.appendChild(deckGroup);
         scrollableContent.appendChild(modelGroup);
@@ -517,7 +603,7 @@
 
         const input = document.createElement('input');
         input.type = type;
-        input.value = value;
+        input.value = value || '';
         input.style.width = '100%';
         input.style.padding = '5px';
         input.style.boxSizing = 'border-box';
@@ -549,8 +635,6 @@
         return div;
     }
 
-    // --- Main UI Integration ---
-
     function createButton(htmlIcon, title, onClickHandler) {
         const btn = document.createElement('button');
         btn.innerHTML = htmlIcon;
@@ -561,13 +645,21 @@
             padding: '2px 5px', transition: 'all 0.2s ease', verticalAlign: 'middle'
         });
 
-        btn.onmouseover = () => { btn.querySelector('svg').style.stroke = ICON_HOVER_COLOR; };
-        btn.onmouseout = () => { btn.querySelector('svg').style.stroke = ICON_COLOR; };
+        btn.onmouseover = () => {
+            const svg = btn.querySelector('svg');
+            if(svg && svg.style.stroke === 'rgb(153, 153, 153)')
+               svg.style.stroke = ICON_HOVER_COLOR;
+        };
+        btn.onmouseout = () => {
+            const svg = btn.querySelector('svg');
+             if(svg && svg.style.stroke === 'rgb(85, 85, 85)')
+               svg.style.stroke = ICON_COLOR;
+        };
 
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            onClickHandler(e);
+            onClickHandler(e, btn);
         });
 
         return btn;
@@ -585,12 +677,8 @@
                 display: 'inline-block', marginLeft: '10px'
             });
 
-            const uploadBtn = createButton(UPLOAD_ICON, "Upload this word to Anki", () => {
-                const data = extractJishoData(entry);
-                if (data) {
-                    console.log("[Jisho2Anki] Extracted Data:", data);
-                    alert(`Data ready. Check Console for details. (Config allows mapping ${currentConfig.modelName})`);
-                }
+            const uploadBtn = createButton(UPLOAD_ICON, "Upload this word to Anki", (e, btn) => {
+                uploadToAnki(entry, btn);
             });
 
             const configBtn = createButton(CONFIG_ICON, "Configure AnkiConnect", () => {
@@ -610,7 +698,6 @@
         });
     }
 
-    // --- Initialization ---
     const observer = new MutationObserver((mutations) => {
         injectControls();
     });

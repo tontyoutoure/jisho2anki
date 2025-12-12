@@ -123,31 +123,44 @@
         const textElement = context.querySelector('.concept_light-representation .text');
         const expression = textElement ? textElement.textContent.trim() : "";
 
-        // --- Reading Extraction (Fix for "Taisetsu" bug) ---
+        // --- Reading Extraction (Robust Fix) ---
         let reading = "";
         const furiganaElement = context.querySelector('.concept_light-representation .furigana');
 
         if (furiganaElement && textElement) {
             const fChildren = Array.from(furiganaElement.children);
+            // 移除空白字符以确保字符索引对齐
+            const cleanExpression = expression.replace(/\s+/g, '');
 
-            // Clean tChildren: remove pure whitespace text nodes to ensure alignment
-            const tChildren = Array.from(textElement.childNodes).filter(node => {
-                return node.textContent.trim().length > 0;
-            });
+            // 策略 A: 字符数与假名块数完全一致 (适用于 "大切", "思い", "海沿い")
+            if (fChildren.length === cleanExpression.length) {
+                for (let i = 0; i < fChildren.length; i++) {
+                    const fText = fChildren[i].textContent.trim();
+                    if (fText) {
+                        // 有假名就用假名 (例如 "たい", "おも")
+                        reading += fText;
+                    } else {
+                        // 假名为空，说明是送假名，回退到使用原文对应的字符 (例如 "い")
+                        reading += cleanExpression[i];
+                    }
+                }
+            } 
+            // 策略 B: 数量不一致 (例如熟字训 "大人" -> "おとな": 1个假名块 vs 2个字符)
+            // 此时回退到基于 DOM 文本节点的旧逻辑，或者简单拼接所有假名
+            else {
+                const tChildren = Array.from(textElement.childNodes).filter(node => {
+                    return node.textContent.trim().length > 0;
+                });
 
-            // Use the FURIGANA length as the master loop, as it defines the segments
-            for (let i = 0; i < fChildren.length; i++) {
-                const fText = fChildren[i].textContent.trim();
-
-                if (fText) {
-                    // Case A: Furigana exists (e.g., "たい" or "せつ")
-                    // We simply use the furigana.
-                    reading += fText;
-                } else {
-                    // Case B: Furigana is empty (e.g., Okurigana like "い" in "おもい")
-                    // We fallback to the source text.
-                    if (i < tChildren.length) {
-                        reading += tChildren[i].textContent.trim();
+                for (let i = 0; i < fChildren.length; i++) {
+                    const fText = fChildren[i].textContent.trim();
+                    if (fText) {
+                        reading += fText;
+                    } else {
+                        // 尝试匹配 DOM 节点
+                        if (i < tChildren.length) {
+                            reading += tChildren[i].textContent.trim();
+                        }
                     }
                 }
             }
